@@ -4,23 +4,19 @@ Plinth is a small pill that sits in the taskbar slot on Windows. The real taskba
 
 The pill you see is a stand-in player, so there is always something on screen while the rest of the app is still a demo. Night Drive is not a real track.
 
-## Run it
+## Install
 
-From this folder:
+People get Plinth from the website. The download is an installer, `Plinth-Setup.exe`. They run that, and the setup screens are where they choose what to allow:
 
-```powershell
-.\run.ps1
-```
+- a desktop shortcut
+- start Plinth when Windows signs in
+- the pill taking the taskbar's place, which the setup page explains before it finishes
 
-That uses the Python 3.12 install from uv when it is there, and `python` otherwise. You can also start it yourself:
+Setup then puts `Plinth.exe` on the machine. It opens from the Start menu, the desktop shortcut, or the sign-in entry if they asked for that. A normal install stays in their user folder and does not ask for an administrator password.
 
-```powershell
-python -m plinth
-```
+The tray icon, the Ctrl+Shift+Q shortcut, and hiding the taskbar work for the signed-in user, so setup does not show a separate permission for each of them. Anything that needs a Windows privacy prompt, such as the microphone, is asked the first time Plinth actually uses it.
 
-Python needs tkinter, which ships with the standard Windows install. Nothing else has to be installed.
-
-The first launch adds Plinth to your Windows sign-in items, so it comes back after a restart. The shortcut is a small launcher under `%LOCALAPPDATA%\Plinth`.
+The installer is not in this repository yet. This folder is the source.
 
 ## Hide it, and actually quit
 
@@ -44,3 +40,19 @@ If a second copy is started while one is already running, it tells you to use th
 Plinth remembers the taskbar state before it changes anything, in `%LOCALAPPDATA%\Plinth\restore.txt`. If the process is killed, start Plinth once more. It puts the bar back before it hides it again. A normal Quit does that restore on the way out.
 
 A short log of what it did is in `%LOCALAPPDATA%\Plinth\demo.log`.
+
+## Working on the source
+
+From this folder, while the installer is still being built:
+
+```powershell
+.\run.ps1
+```
+
+That uses the Python 3.12 install from uv when it is there, and `python` otherwise. You can also start it yourself:
+
+```powershell
+python -m plinth
+```
+
+Python needs tkinter, which ships with the standard Windows install. A launch from this folder still adds Plinth to the current user's sign-in items, through a small launcher under `%LOCALAPPDATA%\Plinth`. The installed app will follow the choices made in setup instead.
