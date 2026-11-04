@@ -1,3 +1,6 @@
+__pycache__/
+*.py[cod]
+.plinth/
 Plinth.exe
 Plinth.pdb
 *.pdb
