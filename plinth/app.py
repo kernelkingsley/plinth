@@ -23,6 +23,7 @@ from plinth.win32 import (
     create_mutex,
     cursor_pos,
     enable_dpi_awareness,
+    find_taskbar,
     foreground_window,
     install_keyboard_hook,
     key_down,
@@ -40,7 +41,8 @@ class Island:
     def __init__(self, root, shell):
         self.root = root
         self.shell = shell
-        self.pill = Pill(root, self.toggle_expanded, self.quit)
+        self._on_hide = None
+        self.pill = Pill(root, self.toggle_expanded, self._request_hide)
         self.left = Slot(root, self.reveal)
         self.right = Slot(root, self.reveal)
         self.shield = Slot(root, self.reveal)
@@ -62,6 +64,7 @@ class Island:
         self.anim_start = 0.0
         self.revealed_at = 0.0
         self.away_since = None
+        self.awake = False
         self._keeper = None
         self._watch = None
 
@@ -90,6 +93,10 @@ class Island:
         self.shown_height = self.compact_height
         self.shown_top = self.anchor_top(self.shown_height)
         self.alive = True
+        self.awake = True
+        self.pill.deiconify()
+        for slot in (self.left, self.right, self.shield):
+            slot.deiconify()
         self.layout_slots()
         self.place_pill(self.shown_top, self.shown_height)
         self.pill.redraw()
@@ -98,8 +105,46 @@ class Island:
             "shown pill at %s,%s %sx%s" % (self.pill_left, self.shown_top, self.pill_width, self.shown_height)
         )
 
-    def quit(self):
-        self.root.quit()
+    def _request_hide(self):
+        if self._on_hide is not None:
+            self._on_hide()
+
+    def hide_to_tray(self):
+        if not self.awake:
+            return
+        self.awake = False
+        self.revealed = False
+        self.animating = False
+        self.away_since = None
+        self.pill.expanded = False
+        self._cancel(self._keeper)
+        self._cancel(self._watch)
+        self._keeper = None
+        self._watch = None
+        self.pill.withdraw()
+        for slot in (self.left, self.right, self.shield):
+            slot.withdraw()
+        self.shell.show_taskbar()
+        self.shell.log("hidden to tray")
+
+    def show_from_tray(self):
+        if self.awake:
+            return
+        if not find_taskbar():
+            self.shell.log("show skipped, taskbar missing")
+            return
+        self.shell.capture()
+        self.shell.save_recovery()
+        self.shell.apply_demo()
+        self.pill.expanded = False
+        self.pill.subtitle = "Click either side"
+        self.pill.help = (
+            "Ctrl+Shift+Q hides Plinth. It stays in the tray.\n"
+            "Right-click that icon and choose Quit to close it."
+        )
+        self.revealed = False
+        self.start()
+        self.shell.log("shown from tray")
 
     def toggle_expanded(self):
         self.pill.expanded = not self.pill.expanded
@@ -133,7 +178,10 @@ class Island:
         self._watch = None
         self.shell.park_taskbar()
         self.pill.subtitle = "Click either side"
-        self.pill.help = "Click either side to show the taskbar.\nCtrl+Shift+Q quits and restores it."
+        self.pill.help = (
+            "Ctrl+Shift+Q hides Plinth. It stays in the tray.\n"
+            "Right-click that icon and choose Quit to close it."
+        )
         for slot in (self.left, self.right, self.shield):
             slot.deiconify()
         self.layout_slots()
@@ -177,7 +225,7 @@ class Island:
         raise_hwnd(widget_hwnd(self.pill))
 
     def _step(self):
-        if not self.animating:
+        if not self.awake or not self.animating:
             return
         t = (time.monotonic() - self.anim_start) / 0.220
         done = t >= 1
@@ -197,14 +245,14 @@ class Island:
             self.root.after(15, self._step)
 
     def _keep(self):
-        if not self.alive or self.revealed or self.animating:
+        if not self.alive or not self.awake or self.revealed or self.animating:
             return
         self.shell.ensure_parked()
         raise_hwnd(widget_hwnd(self.pill))
         self._keeper = self.root.after(180, self._keep)
 
     def _watch_pointer(self):
-        if not self.revealed or not self.alive:
+        if not self.awake or not self.revealed or not self.alive:
             return
         if (time.monotonic() - self.revealed_at) < 0.35:
             self._watch = self.root.after(80, self._watch_pointer)
@@ -261,47 +309,106 @@ def main():
     enable_dpi_awareness()
     _mutex, already = create_mutex("Local\\Plinth.Demo")
     if already:
-        message_box("Plinth is already running.\nRight-click the pill, or press Ctrl+Shift+Q.")
+        message_box("Plinth is already running.\nPress Ctrl+Shift+Q, or right-click its tray icon.")
         return
 
     shell = Shell()
+    try:
+        from plinth.startup import install_startup
+
+        shell.log("startup %s" % install_startup())
+    except OSError as exc:
+        shell.log("startup failed %s" % exc)
+
+    if not _wait_for_taskbar():
+        shell.log("taskbar missing")
+        message_box("Plinth can't find the taskbar yet.")
+        return
+
     root = tk.Tk()
     root.withdraw()
-    island = None
-    hook = None
+    root.title("Plinth")
+    state = {"hook": None, "pending": None}
+    tray = None
     callback = None
 
     def on_key(code, wparam, lparam):
+        # The hook runs inside the key message. Touching Tk here can kill the process
+        # before the taskbar is restored, so this only stores the key.
         if code >= 0 and wparam == WM_KEYDOWN and island is not None:
             info = cast(lparam, POINTER(KBDLLHOOKSTRUCT)).contents
             vk = info.vkCode
             if vk == VK_Q and key_down(VK_CONTROL) and key_down(VK_SHIFT):
-                root.after(0, island.quit)
+                state["pending"] = "toggle"
                 return 1
-            if vk == VK_ESCAPE and island.revealed and not flyout_open():
-                root.after(0, island.dismiss)
+            if vk == VK_ESCAPE and island.awake and island.revealed and not flyout_open():
+                state["pending"] = "dismiss"
                 return 1
-        return call_next_hook(hook, code, wparam, lparam)
+        return call_next_hook(state["hook"], code, wparam, lparam)
 
+    def hide():
+        if island.awake:
+            island.hide_to_tray()
+            if tray is not None:
+                tray.notify_hidden()
+
+    def toggle():
+        if island.awake:
+            hide()
+        else:
+            island.show_from_tray()
+
+    def poll():
+        action = state["pending"]
+        state["pending"] = None
+        if action is None and tray is not None:
+            action = tray.pop()
+        if action == "toggle":
+            toggle()
+        elif action == "dismiss":
+            island.dismiss()
+        elif action == "exit":
+            root.quit()
+            return
+        root.after(40, poll)
+
+    island = None
     try:
         if shell.has_recovery():
             shell.recover_from_crash()
         shell.capture()
         shell.save_recovery()
-        shell.apply_demo()
+        root.update()
         island = Island(root, shell)
+        island._on_hide = hide
+        from plinth.tray import Tray
+
+        tray = Tray(state, lambda: island.awake)
+        shell.log("tray icon %s hwnd=%s error=%s" % (tray.added, tray.hwnd or 0, state.get("tray_error", 0)))
+        shell.apply_demo()
         island.start()
         callback = LowLevelProc(on_key)
-        hook = install_keyboard_hook(callback)
-        shell.log("keyboard hook %s" % (hook or 0))
+        state["hook"] = install_keyboard_hook(callback)
+        shell.log("keyboard hook %s" % (state["hook"] or 0))
+        root.after(40, poll)
         root.mainloop()
     except Exception as exc:
         shell.log("fatal %s" % exc)
         message_box(str(exc))
     finally:
-        remove_keyboard_hook(hook)
+        remove_keyboard_hook(state["hook"])
+        if tray is not None:
+            tray.remove()
         shell.restore()
         try:
             root.destroy()
         except tk.TclError:
             pass
+
+
+def _wait_for_taskbar():
+    for _ in range(40):
+        if find_taskbar():
+            return True
+        time.sleep(0.25)
+    return False

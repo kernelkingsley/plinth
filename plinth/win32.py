@@ -159,6 +159,10 @@ user32.GetAsyncKeyState.argtypes = [c_int]
 user32.GetAsyncKeyState.restype = c_short
 user32.MessageBoxW.argtypes = [HWND, c_wchar_p, c_wchar_p, c_uint]
 user32.MessageBoxW.restype = c_int
+user32.ShowWindow.argtypes = [HWND, c_int]
+user32.ShowWindow.restype = BOOL
+user32.RedrawWindow.argtypes = [HWND, c_void_p, HWND, c_uint]
+user32.RedrawWindow.restype = BOOL
 user32.SetProcessDpiAwarenessContext.argtypes = [c_void_p]
 user32.SetProcessDpiAwarenessContext.restype = BOOL
 
@@ -323,6 +327,9 @@ def show_taskbar_pixels(hwnd):
     if not hwnd:
         return
     user32.SetWindowRgn(hwnd, None, True)
+    user32.ShowWindow(hwnd, 5)
+    # Invalidate, erase, children, frame, and paint now.
+    user32.RedrawWindow(hwnd, None, None, 0x0001 | 0x0004 | 0x0080 | 0x0100 | 0x0400)
 
 
 def taskbar_is_clipped(hwnd):

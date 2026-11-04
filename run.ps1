@@ -1,4 +1,7 @@
-$python = Join-Path $env:APPDATA "uv\python\cpython-3.12-windows-x86_64-none\python.exe"
+$python = Join-Path $env:APPDATA "uv\python\cpython-3.12-windows-x86_64-none\pythonw.exe"
+if (-not (Test-Path $python)) {
+    $python = Join-Path $env:APPDATA "uv\python\cpython-3.12-windows-x86_64-none\python.exe"
+}
 if (-not (Test-Path $python)) {
     $python = "python"
 }

@@ -131,7 +131,10 @@ class Pill(Overlay):
         self.compact_height = 40
         self.title = "Night Drive"
         self.subtitle = "Click either side"
-        self.help = "Click either side to show the taskbar.\nCtrl+Shift+Q quits and restores it."
+        self.help = (
+            "Ctrl+Shift+Q hides Plinth. It stays in the tray.\n"
+            "Right-click that icon and choose Quit to close it."
+        )
         self._on_expand = on_expand
         self._on_quit = on_quit
         self._metrics = None
@@ -178,7 +181,7 @@ class Pill(Overlay):
             width=metrics.help.width,
         )
         self._button(metrics.pause, "Pause" if self.playing else "Play", True)
-        self._button(metrics.quit, "Quit", False)
+        self._button(metrics.quit, "Hide", False)
 
     def _orb(self, hit, color):
         self.canvas.create_oval(hit.x, hit.y, hit.right, hit.bottom, fill=color, outline="")
